@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""
+Watch a URL for changes in a notebook.
+When changes are detected, download and run the notebook.
+"""
+
+# Copyright Min RK
+# License: CC-0
+
+import copy
+from datetime import datetime
+from email.utils import format_datetime
+import os
+import sys
+import time
+
+import requests
+from pytz import UTC
+
+from nbconvert.preprocessors.execute import ExecutePreprocessor
+import nbformat
+
+def utcnow():
+    """timezone-aware UTC timestamp"""
+    return UTC.localize(datetime.utcnow())
+
+
+def get_notebook(url, last_check=None):
+    """Download a notebook from a URL
+    
+    Use If-Modified-Since for caching.
+    If a cache is hit, return None, otherwise parsed json notebook
+    """
+    headers = {}
+    if last_check:
+        # Could also use ETag, etc.
+        headers['If-Modified-Since'] = format_datetime(last_check)
+    
+    print("Downloading %s" % url)
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
+    if r.status_code == 304:
+        print("Cache hit")
+        # cache hit
+        return
+    else:
+        return nbformat.reads(r.text, as_version=4)
+
+
+def run_notebook(nb, executor):
+    """Execute a notebook, returning a copy of the notebook after execution"""
+    # execute the notebook
+    result = copy.deepcopy(nb)
+    executor(result, {})
+    return result
+
+
+def main(url, interval=10):
+    """Check a URL every interval seconds
+    
+    If the notebook has changed, run it and write a notebook with the result.
+    """
+    last_check = None
+    nb = None
+    name = os.path.splitext(url.rsplit('/', 1)[-1])[0]
+    executor = ExecutePreprocessor(enabled=True)
+    while True:
+        new_nb = get_notebook(url, last_check)
+        last_check = utcnow()
+        if new_nb is None:
+            time.sleep(interval)
+            continue
+        if new_nb == nb:
+            print("Notebook hasn't changed")
+            time.sleep(interval)
+            continue
+        nb = new_nb
+        print("Executing")
+        executed = run_notebook(nb, executor)
+        fname = name + datetime.now().strftime("-%Y%m%d-%H%M%S.ipynb")
+        print("Writing %s" % fname)
+        with open(fname, 'w') as f:
+            nbformat.write(executed, f)
+        time.sleep(interval)
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('url', type=str, help="The URL for the notebook to download and run")
+    parser.add_argument('--interval', default=60, type=int, help="The interval (seconds) on which to poll for changes")
+    opts = parser.parse_args()
+    main(opts.url, interval=opts.interval)

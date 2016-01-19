@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Serve a directory with tornado
+
+Like python -m http.server, but with nice cache headers.
+"""
+
+import os
+from tornado.ioloop import IOLoop
+from tornado.log import app_log
+from tornado.httpserver import HTTPServer
+from tornado.options import define, options, parse_command_line
+from tornado.web import StaticFileHandler, Application
+
+define("port", default=8888, help="run on the given port", type=int)
+define("path", default=os.getcwd(), help="directory to serve", type=str)
+
+def main():
+    parse_command_line()
+    app_log.info("Serving %s at http://*:%i", options.path, options.port)
+    app = Application([
+        (r"/(.*)", StaticFileHandler, {'path': options.path}),
+    ])
+    HTTPServer(app).listen(options.port)
+    IOLoop.current().start()
+
+
+if __name__ == "__main__":
+    main()
